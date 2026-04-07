@@ -144,6 +144,14 @@
       font-size: 13px;
       color: #00d4ff;
       font-weight: 600;
+      cursor: pointer;
+      padding: 8px 12px;
+      border-radius: 6px;
+      transition: background 0.2s;
+      display: inline-block;
+    }
+    #panel-visitors:hover {
+      background: rgba(0,212,255,0.1);
     }
 
     /* ── Legend ──────────────────────────────────────────────────────────── */
@@ -214,11 +222,18 @@
       background: #555;
     }
 
-    /* Visited overlay ring */
-    .vol-visited {
-      outline: 2px solid #00d4ff;
+    /* Selected overlay ring (lighter blue) */
+    .vol-selected {
+      outline: 2px solid rgba(0,212,255,0.5);
       outline-offset: 2px;
-      box-shadow: 0 0 8px rgba(0,212,255,0.7) !important;
+      box-shadow: 0 0 6px rgba(0,212,255,0.4) !important;
+    }
+
+    /* Visited overlay ring (darker/brighter blue) */
+    .vol-visited {
+      outline: 3px solid #00d4ff;
+      outline-offset: 2px;
+      box-shadow: 0 0 10px rgba(0,212,255,0.9) !important;
     }
 
     /* ── Visitor count badge on marker ───────────────────────────────────── */
@@ -375,6 +390,11 @@ function toggleVisit(volcanoId) {
     ref.set(true);
     myVisits.add(volcanoId);
   }
+  // Update panel immediately for instant feedback
+  if (selectedId === volcanoId) {
+    updatePanel(volcanoId);
+  }
+  refreshMarker(volcanoId);
 }
 
 // ── Map setup ─────────────────────────────────────────────────────────────
@@ -403,8 +423,12 @@ L.tileLayer(
 ).addTo(map);
 
 // ── Marker icon factory ────────────────────────────────────────────────────
-function makeIcon(status, visited, count) {
-  const dotClass  = `vol-dot vol-${status}${visited ? " vol-visited" : ""}`;
+function makeIcon(status, visited, selected, count) {
+  let stateClass = "";
+  if (visited) stateClass = " vol-visited";
+  else if (selected) stateClass = " vol-selected";
+
+  const dotClass  = `vol-dot vol-${status}${stateClass}`;
   const countHtml = count > 1 ? `<span class="vol-count">${count}</span>` : "";
   const sizes = {
     erupting: 12, active: 9, fumarolic: 7, hydrothermal: 7, uncertain: 6,
@@ -423,14 +447,13 @@ function makeIcon(status, visited, count) {
 function buildMarkers() {
   for (const v of volcanoes) {
     const m = L.marker([v.lat, v.lon], {
-      icon: makeIcon(v.status, false, 0),
+      icon: makeIcon(v.status, false, false, 0),
       title: v.name,
       riseOnHover: true,
     }).addTo(map);
 
     m.on("click", () => {
-      toggleVisit(v.id);
-      openPanel(v.id);
+      openPanel(v.id);  // Only open panel, don't toggle visit
     });
 
     markers[v.id] = m;
@@ -443,8 +466,9 @@ function refreshMarker(volcanoId) {
   if (!m) return;
   const v       = volcanoes.find(x => x.id === volcanoId);
   const visited = myVisits.has(volcanoId) || (visitCounts[volcanoId] || 0) > 0;
+  const selected = volcanoId === selectedId;
   const count   = visitCounts[volcanoId] || 0;
-  m.setIcon(makeIcon(v.status, visited, count));
+  m.setIcon(makeIcon(v.status, visited, selected, count));
 }
 
 // ── Refresh all markers (after Firebase batch update) ─────────────────────
@@ -463,9 +487,14 @@ function updateCounter() {
 
 // ── Info panel ─────────────────────────────────────────────────────────────
 function openPanel(volcanoId) {
+  const previousId = selectedId;
   selectedId = volcanoId;
   updatePanel(volcanoId);
   document.getElementById("info-panel").classList.add("visible");
+
+  // Refresh markers to show selection state
+  if (previousId) refreshMarker(previousId);
+  refreshMarker(volcanoId);
 }
 
 function updatePanel(volcanoId) {
@@ -497,19 +526,38 @@ function updatePanel(volcanoId) {
   `;
 
   const visitEl = document.getElementById("panel-visitors");
-  if (count === 0) {
-    visitEl.textContent = "Tap to mark as visited →";
-    visitEl.style.color = "#666";
+
+  // Remove old click handlers
+  visitEl.replaceWith(visitEl.cloneNode(true));
+  const newVisitEl = document.getElementById("panel-visitors");
+
+  if (isMine) {
+    // Already marked by me
+    newVisitEl.textContent = `✓ You marked this volcano (${count} total visitor${count > 1 ? "s" : ""}) • Click to unmark`;
+    newVisitEl.style.color = "#00d4ff";
+  } else if (count > 0) {
+    // Others visited, but not me
+    newVisitEl.textContent = `${count} person${count > 1 ? "s" : ""} visited • Click to mark as visited`;
+    newVisitEl.style.color = "#888";
   } else {
-    const who = isMine ? "including you" : "others";
-    visitEl.textContent = `✓ ${count} person${count > 1 ? "s" : ""} in this room visited this volcano (${who})`;
-    visitEl.style.color = "#00d4ff";
+    // No visits yet
+    newVisitEl.textContent = "Click to mark as visited →";
+    newVisitEl.style.color = "#888";
   }
+
+  // Add click handler to toggle visit
+  newVisitEl.onclick = () => {
+    toggleVisit(volcanoId);
+  };
 }
 
 function closePanel() {
+  const previousId = selectedId;
   selectedId = null;
   document.getElementById("info-panel").classList.remove("visible");
+
+  // Refresh the previously selected marker
+  if (previousId) refreshMarker(previousId);
 }
 
 document.getElementById("close-panel").addEventListener("click", closePanel);
