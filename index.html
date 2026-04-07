@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Volcanoes Across Disciplines — EGU Campfire</title>
+
+  <!-- Leaflet 1.9 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+  <!-- Firebase 9 (compat / v8-style API) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; font-family: 'Segoe UI', system-ui, sans-serif; background: #111; color: #eee; }
+
+    /* ── Full-screen map ──────────────────────────────────────────────────── */
+    #map { position: fixed; inset: 0; z-index: 0; }
+
+    /* ── Top bar ─────────────────────────────────────────────────────────── */
+    #topbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 900;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.85) 60%, transparent);
+      pointer-events: none;
+    }
+    #title {
+      font-size: clamp(12px, 2vw, 18px);
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      color: #fff;
+      text-shadow: 0 1px 4px #000;
+    }
+    #counter-badge {
+      font-size: clamp(13px, 2vw, 20px);
+      font-weight: 800;
+      color: #00d4ff;
+      text-shadow: 0 0 12px rgba(0,212,255,0.7);
+      white-space: nowrap;
+    }
+
+    /* ── Search ──────────────────────────────────────────────────────────── */
+    #search-container {
+      position: fixed; top: 54px; right: 12px; z-index: 1000;
+      width: min(300px, calc(100vw - 24px));
+    }
+    #search-input {
+      width: 100%;
+      padding: 9px 14px;
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      background: rgba(20,20,30,0.92);
+      color: #fff;
+      font-size: 14px;
+      outline: none;
+      backdrop-filter: blur(6px);
+      transition: border-color 0.2s;
+    }
+    #search-input::placeholder { color: #888; }
+    #search-input:focus { border-color: #00d4ff; }
+    #search-results {
+      margin-top: 4px;
+      background: rgba(20,20,30,0.96);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 8px;
+      overflow: hidden;
+      display: none;
+    }
+    .search-item {
+      padding: 9px 14px;
+      cursor: pointer;
+      font-size: 13px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      transition: background 0.15s;
+    }
+    .search-item:last-child { border-bottom: none; }
+    .search-item:hover { background: rgba(0,212,255,0.15); }
+    .search-item .si-name { font-weight: 600; color: #fff; }
+    .search-item .si-meta { color: #999; font-size: 11px; }
+    .search-item .si-status { float: right; font-size: 10px; padding: 1px 6px; border-radius: 4px; margin-top: 2px; }
+    .status-erupting  { background: rgba(255,60,60,0.3);  color: #ff8080; }
+    .status-active    { background: rgba(255,140,0,0.3);  color: #ffaa55; }
+    .status-fumarolic { background: rgba(255,220,0,0.3);  color: #ffd040; }
+    .status-hydrothermal { background: rgba(100,200,100,0.3); color: #80e080; }
+    .status-uncertain { background: rgba(150,150,150,0.3); color: #aaa; }
+
+    /* ── Info panel ──────────────────────────────────────────────────────── */
+    #info-panel {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 900;
+      background: rgba(14,14,22,0.96);
+      border-top: 1px solid rgba(255,255,255,0.1);
+      backdrop-filter: blur(8px);
+      padding: 16px 20px 20px;
+      transform: translateY(100%);
+      transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+      max-height: 50vh;
+      overflow-y: auto;
+    }
+    #info-panel.visible { transform: translateY(0); }
+    #close-panel {
+      position: absolute; top: 10px; right: 14px;
+      background: none; border: none; color: #aaa; font-size: 22px;
+      cursor: pointer; line-height: 1;
+    }
+    #close-panel:hover { color: #fff; }
+    #panel-volcano-name {
+      font-size: clamp(16px, 3vw, 24px);
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 6px;
+      padding-right: 30px;
+    }
+    #panel-status-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 12px;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .badge-erupting  { background: rgba(255,60,60,0.25);  border: 1px solid #ff4444; color: #ff8888; }
+    .badge-active    { background: rgba(255,140,0,0.25);  border: 1px solid #ff8800; color: #ffaa55; }
+    .badge-fumarolic { background: rgba(255,220,0,0.25);  border: 1px solid #ffd000; color: #ffe060; }
+    .badge-hydrothermal { background: rgba(80,200,100,0.25); border: 1px solid #50c864; color: #80e080; }
+    .badge-uncertain { background: rgba(150,150,150,0.2); border: 1px solid #888; color: #bbb; }
+    #panel-meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 10px;
+      font-size: 13px;
+    }
+    .meta-item { display: flex; flex-direction: column; gap: 2px; }
+    .meta-label { color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .meta-value { color: #ddd; font-weight: 500; }
+    #panel-visitors {
+      margin-top: 14px;
+      font-size: 13px;
+      color: #00d4ff;
+      font-weight: 600;
+    }
+
+    /* ── Legend ──────────────────────────────────────────────────────────── */
+    #legend {
+      position: fixed; bottom: 16px; right: 12px; z-index: 900;
+      background: rgba(14,14,22,0.88);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 10px 14px;
+      backdrop-filter: blur(6px);
+      font-size: 12px;
+    }
+    .leg-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; color: #ccc; }
+    .leg-row:last-child { margin-bottom: 0; }
+    .leg-dot {
+      width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+    }
+    .leg-erupting  { background: #ff3333; box-shadow: 0 0 6px #ff3333; }
+    .leg-active    { background: #ff8800; }
+    .leg-fumarolic { background: #ffd000; width: 9px; height: 9px; }
+    .leg-hydrothermal { background: #50c864; width: 9px; height: 9px; }
+    .leg-uncertain { background: #666; width: 8px; height: 8px; }
+    .leg-visited   {
+      background: transparent;
+      border: 2px solid #00d4ff;
+      box-shadow: 0 0 6px rgba(0,212,255,0.6);
+    }
+
+    /* ── Volcano marker dots ─────────────────────────────────────────────── */
+    .vol-dot {
+      border-radius: 50%;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .vol-dot:hover { transform: scale(1.6); }
+
+    .vol-erupting {
+      width: 12px; height: 12px;
+      background: radial-gradient(circle, #ff6666, #cc0000);
+      box-shadow: 0 0 0 0 rgba(255,51,51,0.8);
+      animation: pulse-erupting 1.8s ease-in-out infinite;
+    }
+    @keyframes pulse-erupting {
+      0%   { box-shadow: 0 0 0 0   rgba(255,51,51,0.8); }
+      60%  { box-shadow: 0 0 0 8px rgba(255,51,51,0);   }
+      100% { box-shadow: 0 0 0 0   rgba(255,51,51,0);   }
+    }
+
+    .vol-active {
+      width: 9px; height: 9px;
+      background: radial-gradient(circle, #ffaa55, #cc6600);
+    }
+    .vol-fumarolic {
+      width: 7px; height: 7px;
+      background: radial-gradient(circle, #ffe060, #cc9900);
+    }
+    .vol-hydrothermal {
+      width: 7px; height: 7px;
+      background: radial-gradient(circle, #80e080, #2a8a2a);
+    }
+    .vol-uncertain {
+      width: 6px; height: 6px;
+      background: #555;
+    }
+
+    /* Visited overlay ring */
+    .vol-visited {
+      outline: 2px solid #00d4ff;
+      outline-offset: 2px;
+      box-shadow: 0 0 8px rgba(0,212,255,0.7) !important;
+    }
+
+    /* ── Visitor count badge on marker ───────────────────────────────────── */
+    .vol-wrapper { position: relative; display: inline-block; }
+    .vol-count {
+      position: absolute;
+      top: -8px; right: -10px;
+      background: #00d4ff;
+      color: #000;
+      font-size: 9px;
+      font-weight: 800;
+      padding: 1px 4px;
+      border-radius: 6px;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
+    /* ── Loading overlay ─────────────────────────────────────────────────── */
+    #loading {
+      position: fixed; inset: 0; z-index: 9999;
+      background: #111;
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 14px;
+    }
+    #loading-text { color: #aaa; font-size: 16px; }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid rgba(255,255,255,0.1);
+      border-top-color: #ff4400;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<!-- Loading screen -->
+<div id="loading">
+  <div class="spinner"></div>
+  <div id="loading-text">Loading volcanoes…</div>
+</div>
+
+<!-- Map container -->
+<div id="map"></div>
+
+<!-- Top bar -->
+<div id="topbar">
+  <div id="title">🌋 Volcanoes Across Disciplines — EGU Campfire</div>
+  <div id="counter-badge">0 volcanoes visited</div>
+</div>
+
+<!-- Search -->
+<div id="search-container">
+  <input type="text" id="search-input" placeholder="🔍 Search volcano or country…" autocomplete="off">
+  <div id="search-results"></div>
+</div>
+
+<!-- Info panel (slides up on click) -->
+<div id="info-panel">
+  <button id="close-panel" title="Close">×</button>
+  <div id="panel-volcano-name"></div>
+  <div id="panel-status-badge"></div>
+  <div id="panel-meta"></div>
+  <div id="panel-visitors"></div>
+</div>
+
+<!-- Legend -->
+<div id="legend">
+  <div class="leg-row"><span class="leg-dot leg-erupting"></span> Currently erupting</div>
+  <div class="leg-row"><span class="leg-dot leg-active"></span> Historically active</div>
+  <div class="leg-row"><span class="leg-dot leg-fumarolic"></span> Fumarolic</div>
+  <div class="leg-row"><span class="leg-dot leg-hydrothermal"></span> Hydrothermal</div>
+  <div class="leg-row"><span class="leg-dot leg-uncertain"></span> Uncertain</div>
+  <div class="leg-row"><span class="leg-dot leg-visited"></span> Visited by the room</div>
+</div>
+
+<script>
+// =============================================================================
+// ── FIREBASE CONFIG — replace all placeholders before deploying ────────────
+// =============================================================================
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyA_mwzX8WgQI7ijibSLJPdFRE5iriNkdGk",
+  authDomain:        "egu-campfire.firebaseapp.com",
+  databaseURL:       "https://egu-campfire-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:         "egu-campfire",
+  storageBucket:     "egu-campfire.firebasestorage.app",
+  messagingSenderId: "41033732370",
+  appId:             "1:41033732370:web:b9d6258c501621b85ee3cb"
+};
+// =============================================================================
+
+// ── Session identity (per browser tab — persists across page reload via sessionStorage) ──
+let sessionId = sessionStorage.getItem("vcSessionId");
+if (!sessionId) {
+  sessionId = Math.random().toString(36).slice(2, 11);
+  sessionStorage.setItem("vcSessionId", sessionId);
+}
+
+// ── State ──────────────────────────────────────────────────────────────────
+let volcanoes    = [];          // full volcano list from volcanoes.json
+let markers      = {};          // volcanoId → Leaflet marker
+let visitCounts  = {};          // volcanoId → number of visitors
+let myVisits     = new Set();   // volcano IDs this session has marked
+let selectedId   = null;        // currently open info panel
+let db           = null;        // Firebase Realtime Database instance
+
+// ── Initialise Firebase ────────────────────────────────────────────────────
+function initFirebase() {
+  try {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.database();
+    listenToVisits();
+    console.log("Firebase connected.");
+  } catch (e) {
+    console.warn("Firebase init failed — running in offline/demo mode.", e);
+  }
+}
+
+// ── Real-time listener: update all markers when visits change ─────────────
+function listenToVisits() {
+  db.ref("visits").on("value", snapshot => {
+    const data = snapshot.val() || {};
+    visitCounts = {};
+    for (const [vid, sessions] of Object.entries(data)) {
+      visitCounts[vid] = Object.keys(sessions).length;
+    }
+    refreshAllMarkers();
+    updateCounter();
+  });
+}
+
+// ── Toggle visit for the selected volcano ─────────────────────────────────
+function toggleVisit(volcanoId) {
+  if (!db) {
+    // Offline demo mode: just toggle locally
+    if (myVisits.has(volcanoId)) {
+      myVisits.delete(volcanoId);
+      visitCounts[volcanoId] = Math.max(0, (visitCounts[volcanoId] || 1) - 1);
+    } else {
+      myVisits.add(volcanoId);
+      visitCounts[volcanoId] = (visitCounts[volcanoId] || 0) + 1;
+    }
+    refreshMarker(volcanoId);
+    updateCounter();
+    updatePanel(volcanoId);
+    return;
+  }
+  const ref = db.ref(`visits/${volcanoId}/${sessionId}`);
+  if (myVisits.has(volcanoId)) {
+    ref.remove();
+    myVisits.delete(volcanoId);
+  } else {
+    ref.set(true);
+    myVisits.add(volcanoId);
+  }
+}
+
+// ── Map setup ─────────────────────────────────────────────────────────────
+const map = L.map("map", {
+  center: [20, 10],
+  zoom: 2,
+  minZoom: 2,
+  maxZoom: 12,
+  zoomControl: true,
+  attributionControl: true,
+});
+
+L.tileLayer(
+  "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+  {
+    attribution:
+      '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> ' +
+      '© <a href="https://carto.com/attributions">CARTO</a> | ' +
+      'Volcano data: <a href="https://volcano.si.edu">Smithsonian GVP</a>',
+    subdomains: "abcd",
+    maxZoom: 19,
+  }
+).addTo(map);
+
+// ── Marker icon factory ────────────────────────────────────────────────────
+function makeIcon(status, visited, count) {
+  const dotClass  = `vol-dot vol-${status}${visited ? " vol-visited" : ""}`;
+  const countHtml = count > 1 ? `<span class="vol-count">${count}</span>` : "";
+  const sizes = {
+    erupting: 12, active: 9, fumarolic: 7, hydrothermal: 7, uncertain: 6,
+  };
+  const sz = sizes[status] || 8;
+  return L.divIcon({
+    className: "",
+    html: `<div class="vol-wrapper"><div class="${dotClass}"></div>${countHtml}</div>`,
+    iconSize:   [sz, sz],
+    iconAnchor: [sz / 2, sz / 2],
+    popupAnchor:[0, -sz],
+  });
+}
+
+// ── Build all markers ──────────────────────────────────────────────────────
+function buildMarkers() {
+  for (const v of volcanoes) {
+    const m = L.marker([v.lat, v.lon], {
+      icon: makeIcon(v.status, false, 0),
+      title: v.name,
+      riseOnHover: true,
+    }).addTo(map);
+
+    m.on("click", () => {
+      toggleVisit(v.id);
+      openPanel(v.id);
+    });
+
+    markers[v.id] = m;
+  }
+}
+
+// ── Refresh a single marker's icon ────────────────────────────────────────
+function refreshMarker(volcanoId) {
+  const m = markers[volcanoId];
+  if (!m) return;
+  const v       = volcanoes.find(x => x.id === volcanoId);
+  const visited = myVisits.has(volcanoId) || (visitCounts[volcanoId] || 0) > 0;
+  const count   = visitCounts[volcanoId] || 0;
+  m.setIcon(makeIcon(v.status, visited, count));
+}
+
+// ── Refresh all markers (after Firebase batch update) ─────────────────────
+function refreshAllMarkers() {
+  for (const v of volcanoes) refreshMarker(v.id);
+}
+
+// ── Counter ────────────────────────────────────────────────────────────────
+function updateCounter() {
+  const n = Object.values(visitCounts).filter(c => c > 0).length;
+  document.getElementById("counter-badge").textContent =
+    n === 0 ? "0 volcanoes visited"
+    : n === 1 ? "1 volcano visited by this room 🌋"
+    : `${n} volcanoes visited by this room 🌋`;
+}
+
+// ── Info panel ─────────────────────────────────────────────────────────────
+function openPanel(volcanoId) {
+  selectedId = volcanoId;
+  updatePanel(volcanoId);
+  document.getElementById("info-panel").classList.add("visible");
+}
+
+function updatePanel(volcanoId) {
+  const v       = volcanoes.find(x => x.id === volcanoId);
+  const count   = visitCounts[volcanoId] || 0;
+  const isMine  = myVisits.has(volcanoId);
+
+  const statusLabels = {
+    erupting:     "🔴 Currently Erupting",
+    active:       "🟠 Historically Active",
+    fumarolic:    "🟡 Fumarolic",
+    hydrothermal: "🟢 Hydrothermal",
+    uncertain:    "⚫ Uncertain",
+  };
+  const elev = v.elevation != null
+    ? (v.elevation >= 0 ? `${v.elevation} m a.s.l.` : `${Math.abs(v.elevation)} m b.s.l.`)
+    : "Unknown";
+
+  document.getElementById("panel-volcano-name").textContent = v.name;
+  document.getElementById("panel-status-badge").className   = `badge-${v.status}`;
+  document.getElementById("panel-status-badge").textContent = statusLabels[v.status] || v.status;
+  document.getElementById("panel-meta").innerHTML = `
+    <div class="meta-item"><span class="meta-label">Country</span><span class="meta-value">${v.country || "—"}</span></div>
+    <div class="meta-item"><span class="meta-label">Region</span><span class="meta-value">${v.subregion || v.region || "—"}</span></div>
+    <div class="meta-item"><span class="meta-label">Type</span><span class="meta-value">${v.type || "—"}</span></div>
+    <div class="meta-item"><span class="meta-label">Elevation</span><span class="meta-value">${elev}</span></div>
+    <div class="meta-item"><span class="meta-label">Last eruption</span><span class="meta-value">${v.last_eruption || "Unknown"}</span></div>
+    <div class="meta-item"><span class="meta-label">Evidence</span><span class="meta-value">${v.evidence || "—"}</span></div>
+  `;
+
+  const visitEl = document.getElementById("panel-visitors");
+  if (count === 0) {
+    visitEl.textContent = "Tap to mark as visited →";
+    visitEl.style.color = "#666";
+  } else {
+    const who = isMine ? "including you" : "others";
+    visitEl.textContent = `✓ ${count} person${count > 1 ? "s" : ""} in this room visited this volcano (${who})`;
+    visitEl.style.color = "#00d4ff";
+  }
+}
+
+function closePanel() {
+  selectedId = null;
+  document.getElementById("info-panel").classList.remove("visible");
+}
+
+document.getElementById("close-panel").addEventListener("click", closePanel);
+map.on("click", e => {
+  if (e.originalEvent.target === map._container) closePanel();
+});
+
+// ── Search ─────────────────────────────────────────────────────────────────
+const searchInput   = document.getElementById("search-input");
+const searchResults = document.getElementById("search-results");
+
+searchInput.addEventListener("input", () => {
+  const q = searchInput.value.trim().toLowerCase();
+  if (q.length < 2) { searchResults.style.display = "none"; return; }
+
+  const hits = volcanoes
+    .filter(v =>
+      v.name.toLowerCase().includes(q) ||
+      (v.country && v.country.toLowerCase().includes(q))
+    )
+    .sort((a, b) => {
+      // Prioritise: erupting > starts-with name > other
+      if (a.erupting && !b.erupting) return -1;
+      if (!a.erupting && b.erupting) return 1;
+      const an = a.name.toLowerCase().startsWith(q);
+      const bn = b.name.toLowerCase().startsWith(q);
+      if (an && !bn) return -1;
+      if (!an && bn) return 1;
+      return a.name.localeCompare(b.name);
+    })
+    .slice(0, 8);
+
+  if (!hits.length) {
+    searchResults.style.display = "none";
+    return;
+  }
+
+  const statusLabel = { erupting:"erupting", active:"active",
+    fumarolic:"fumarolic", hydrothermal:"hydrothermal", uncertain:"uncertain" };
+
+  searchResults.innerHTML = hits.map(v => `
+    <div class="search-item" data-id="${v.id}">
+      <span class="si-status status-${v.status}">${statusLabel[v.status]}</span>
+      <div class="si-name">${v.name}</div>
+      <div class="si-meta">${v.country} &middot; ${v.type || "—"}</div>
+    </div>
+  `).join("");
+  searchResults.style.display = "block";
+});
+
+searchResults.addEventListener("click", e => {
+  const item = e.target.closest(".search-item");
+  if (!item) return;
+  const v = volcanoes.find(x => x.id === item.dataset.id);
+  if (!v) return;
+  map.flyTo([v.lat, v.lon], Math.max(map.getZoom(), 6), { duration: 1.2 });
+  searchInput.value   = v.name;
+  searchResults.style.display = "none";
+  setTimeout(() => openPanel(v.id), 800);
+});
+
+document.addEventListener("click", e => {
+  if (!document.getElementById("search-container").contains(e.target)) {
+    searchResults.style.display = "none";
+  }
+});
+
+searchInput.addEventListener("keydown", e => {
+  if (e.key === "Escape") { searchInput.value = ""; searchResults.style.display = "none"; }
+});
+
+// ── Bootstrap ──────────────────────────────────────────────────────────────
+async function init() {
+  document.getElementById("loading-text").textContent = "Loading volcanoes…";
+
+  let data;
+  try {
+    const res = await fetch("volcanoes.json");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    data = await res.json();
+  } catch (e) {
+    document.getElementById("loading-text").textContent =
+      "⚠️ Could not load volcanoes.json — run prepare_data.py first.";
+    console.error(e);
+    return;
+  }
+
+  volcanoes = data;
+  document.getElementById("loading-text").textContent =
+    `Building map (${volcanoes.length} volcanoes)…`;
+
+  // Small delay so the browser can paint the loading message
+  await new Promise(r => setTimeout(r, 50));
+  buildMarkers();
+
+  document.getElementById("loading-text").textContent = "Connecting to Firebase…";
+  initFirebase();
+
+  // Hide loading screen
+  const loadEl = document.getElementById("loading");
+  loadEl.style.transition = "opacity 0.5s";
+  loadEl.style.opacity    = "0";
+  setTimeout(() => loadEl.remove(), 500);
+}
+
+init();
+</script>
+</body>
+</html>
