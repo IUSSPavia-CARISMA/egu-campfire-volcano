@@ -180,11 +180,6 @@
     .leg-fumarolic { background: #ffd000; width: 9px; height: 9px; }
     .leg-hydrothermal { background: #50c864; width: 9px; height: 9px; }
     .leg-uncertain { background: #666; width: 8px; height: 8px; }
-    .leg-others-viewing {
-      background: transparent;
-      border: 2px solid #ff8800;
-      box-shadow: 0 0 6px rgba(255,140,0,0.5);
-    }
     .leg-visited   {
       background: transparent;
       border: 2px solid #00d4ff;
@@ -226,13 +221,6 @@
     .vol-uncertain {
       width: 6px; height: 6px;
       background: #555;
-    }
-
-    /* Others viewing ring (orange) */
-    .vol-others-viewing {
-      outline: 2px solid rgba(255,140,0,0.6);
-      outline-offset: 2px;
-      box-shadow: 0 0 8px rgba(255,140,0,0.5) !important;
     }
 
     /* Selected overlay ring (lighter blue) */
@@ -321,7 +309,6 @@
   <div class="leg-row"><span class="leg-dot leg-fumarolic"></span> Fumarolic</div>
   <div class="leg-row"><span class="leg-dot leg-hydrothermal"></span> Hydrothermal</div>
   <div class="leg-row"><span class="leg-dot leg-uncertain"></span> Uncertain</div>
-  <div class="leg-row"><span class="leg-dot leg-others-viewing"></span> Others viewing now</div>
   <div class="leg-row"><span class="leg-dot leg-visited"></span> Visited by the room</div>
 </div>
 
@@ -353,7 +340,6 @@ let markers      = {};          // volcanoId → Leaflet marker
 let visitCounts  = {};          // volcanoId → number of visitors
 let myVisits     = new Set();   // volcano IDs this session has marked
 let selectedId   = null;        // currently open info panel
-let activeCounts = {};          // volcanoId → number of people currently viewing
 let db           = null;        // Firebase Realtime Database instance
 
 // ── Initialise Firebase ────────────────────────────────────────────────────
@@ -362,7 +348,6 @@ function initFirebase() {
     firebase.initializeApp(FIREBASE_CONFIG);
     db = firebase.database();
     listenToVisits();
-    listenToActiveSelections();
     console.log("Firebase connected.");
   } catch (e) {
     console.warn("Firebase init failed — running in offline/demo mode.", e);
@@ -379,22 +364,6 @@ function listenToVisits() {
     }
     refreshAllMarkers();
     updateCounter();
-  });
-}
-
-// ── Real-time listener: update markers when active selections change ──────
-function listenToActiveSelections() {
-  db.ref("selections").on("value", snapshot => {
-    const data = snapshot.val() || {};
-    activeCounts = {};
-    for (const [vid, sessions] of Object.entries(data)) {
-      // Count sessions that are not mine
-      const otherSessions = Object.keys(sessions).filter(sid => sid !== sessionId);
-      if (otherSessions.length > 0) {
-        activeCounts[vid] = otherSessions.length;
-      }
-    }
-    refreshAllMarkers();
   });
 }
 
@@ -455,11 +424,10 @@ L.tileLayer(
 ).addTo(map);
 
 // ── Marker icon factory ────────────────────────────────────────────────────
-function makeIcon(status, visited, selected, othersViewing, count) {
+function makeIcon(status, visited, selected, count) {
   let stateClass = "";
   if (visited) stateClass = " vol-visited";
   else if (selected) stateClass = " vol-selected";
-  else if (othersViewing) stateClass = " vol-others-viewing";
 
   const dotClass  = `vol-dot vol-${status}${stateClass}`;
   const countHtml = count > 1 ? `<span class="vol-count">${count}</span>` : "";
@@ -480,7 +448,7 @@ function makeIcon(status, visited, selected, othersViewing, count) {
 function buildMarkers() {
   for (const v of volcanoes) {
     const m = L.marker([v.lat, v.lon], {
-      icon: makeIcon(v.status, false, false, false, 0),
+      icon: makeIcon(v.status, false, false, 0),
       title: v.name,
       riseOnHover: true,
     }).addTo(map);
@@ -500,9 +468,8 @@ function refreshMarker(volcanoId) {
   const v       = volcanoes.find(x => x.id === volcanoId);
   const visited = myVisits.has(volcanoId) || (visitCounts[volcanoId] || 0) > 0;
   const selected = volcanoId === selectedId;
-  const othersViewing = (activeCounts[volcanoId] || 0) > 0;
   const count   = visitCounts[volcanoId] || 0;
-  m.setIcon(makeIcon(v.status, visited, selected, othersViewing, count));
+  m.setIcon(makeIcon(v.status, visited, selected, count));
 }
 
 // ── Refresh all markers (after Firebase batch update) ─────────────────────
@@ -525,14 +492,6 @@ function openPanel(volcanoId) {
   selectedId = volcanoId;
   updatePanel(volcanoId);
   document.getElementById("info-panel").classList.add("visible");
-
-  // Update active selection in Firebase
-  if (db) {
-    if (previousId) {
-      db.ref(`selections/${previousId}/${sessionId}`).remove();
-    }
-    db.ref(`selections/${volcanoId}/${sessionId}`).set(true);
-  }
 
   // Refresh markers to show selection state
   if (previousId) refreshMarker(previousId);
@@ -598,11 +557,6 @@ function closePanel() {
   selectedId = null;
   document.getElementById("info-panel").classList.remove("visible");
 
-  // Remove active selection from Firebase
-  if (db && previousId) {
-    db.ref(`selections/${previousId}/${sessionId}`).remove();
-  }
-
   // Refresh the previously selected marker
   if (previousId) refreshMarker(previousId);
 }
@@ -610,13 +564,6 @@ function closePanel() {
 document.getElementById("close-panel").addEventListener("click", closePanel);
 map.on("click", e => {
   if (e.originalEvent.target === map._container) closePanel();
-});
-
-// Clean up active selection when user leaves the page
-window.addEventListener("beforeunload", () => {
-  if (db && selectedId) {
-    db.ref(`selections/${selectedId}/${sessionId}`).remove();
-  }
 });
 
 // ── Search ─────────────────────────────────────────────────────────────────
