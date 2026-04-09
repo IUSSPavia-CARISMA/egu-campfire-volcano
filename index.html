@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <title>Volcanoes Across Disciplines — EGU Campfire</title>
+  <title>Volcanoes Across Disciplines — EGU GMPV & NH Division Campfire</title>
 
   <!-- Leaflet 1.9 -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
@@ -139,8 +139,15 @@
     .meta-item { display: flex; flex-direction: column; gap: 2px; }
     .meta-label { color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
     .meta-value { color: #ddd; font-weight: 500; }
-    #panel-visitors {
+    .meta-icon { margin-right: 4px; opacity: 0.6; }
+    #panel-actions {
       margin-top: 14px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    #panel-visitors {
       font-size: 13px;
       color: #00d4ff;
       font-weight: 600;
@@ -153,6 +160,25 @@
     #panel-visitors:hover {
       background: rgba(0,212,255,0.1);
     }
+    #gvp-link {
+      padding: 8px 14px;
+      background: rgba(255,140,0,0.15);
+      border: 1px solid rgba(255,140,0,0.4);
+      border-radius: 6px;
+      color: #ffaa55;
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 600;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #gvp-link:hover {
+      background: rgba(255,140,0,0.25);
+      border-color: rgba(255,140,0,0.6);
+      transform: translateY(-1px);
+    }
 
     /* ── Legend ──────────────────────────────────────────────────────────── */
     #legend {
@@ -163,6 +189,7 @@
       padding: 10px 14px;
       backdrop-filter: blur(6px);
       font-size: 12px;
+      display: none; /* Hidden since volcano status data not available */
     }
 
     /* ── Leaflet zoom controls positioning ───────────────────────────────── */
@@ -190,9 +217,37 @@
     .vol-dot {
       border-radius: 50%;
       cursor: pointer;
-      transition: transform 0.15s, box-shadow 0.15s;
+      transition: transform 0.2s, box-shadow 0.2s, filter 0.2s;
     }
-    .vol-dot:hover { transform: scale(1.6); }
+    .vol-dot:hover {
+      transform: scale(1.8);
+      filter: brightness(1.4);
+      box-shadow: 0 0 12px currentColor !important;
+    }
+
+    /* ── Leaflet tooltip styling ──────────────────────────────────────────── */
+    .leaflet-tooltip {
+      background: rgba(14,14,22,0.95) !important;
+      border: 1px solid rgba(255,255,255,0.2) !important;
+      border-radius: 6px !important;
+      color: #fff !important;
+      font-size: 13px !important;
+      padding: 6px 10px !important;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important;
+    }
+    .leaflet-tooltip-left::before,
+    .leaflet-tooltip-right::before {
+      border-left-color: rgba(14,14,22,0.95) !important;
+      border-right-color: rgba(14,14,22,0.95) !important;
+    }
+    .tooltip-volcano-name {
+      font-weight: 700;
+      margin-bottom: 2px;
+    }
+    .tooltip-status {
+      font-size: 11px;
+      opacity: 0.8;
+    }
 
     .vol-erupting {
       width: 12px; height: 12px;
@@ -299,7 +354,12 @@
   <div id="panel-volcano-name"></div>
   <div id="panel-status-badge"></div>
   <div id="panel-meta"></div>
-  <div id="panel-visitors"></div>
+  <div id="panel-actions">
+    <div id="panel-visitors"></div>
+    <a id="gvp-link" href="#" target="_blank" rel="noopener">
+      🔗 View on GVP
+    </a>
+  </div>
 </div>
 
 <!-- Legend -->
@@ -446,12 +506,31 @@ function makeIcon(status, visited, selected, count) {
 
 // ── Build all markers ──────────────────────────────────────────────────────
 function buildMarkers() {
+  const statusLabels = {
+    erupting:     "Currently Erupting",
+    active:       "Historically Active",
+    fumarolic:    "Fumarolic",
+    hydrothermal: "Hydrothermal",
+    uncertain:    "Uncertain",
+  };
+
   for (const v of volcanoes) {
     const m = L.marker([v.lat, v.lon], {
       icon: makeIcon(v.status, false, false, 0),
       title: v.name,
       riseOnHover: true,
     }).addTo(map);
+
+    // Add hover tooltip
+    const tooltipContent = `
+      <div class="tooltip-volcano-name">${v.name}</div>
+      <div class="tooltip-status">${statusLabels[v.status] || v.status}</div>
+    `;
+    m.bindTooltip(tooltipContent, {
+      direction: 'top',
+      offset: [0, -8],
+      opacity: 0.95
+    });
 
     m.on("click", () => {
       openPanel(v.id);  // Only open panel, don't toggle visit
@@ -518,13 +597,18 @@ function updatePanel(volcanoId) {
   document.getElementById("panel-status-badge").className   = `badge-${v.status}`;
   document.getElementById("panel-status-badge").textContent = statusLabels[v.status] || v.status;
   document.getElementById("panel-meta").innerHTML = `
-    <div class="meta-item"><span class="meta-label">Country</span><span class="meta-value">${v.country || "—"}</span></div>
-    <div class="meta-item"><span class="meta-label">Region</span><span class="meta-value">${v.subregion || v.region || "—"}</span></div>
-    <div class="meta-item"><span class="meta-label">Type</span><span class="meta-value">${v.type || "—"}</span></div>
-    <div class="meta-item"><span class="meta-label">Elevation</span><span class="meta-value">${elev}</span></div>
-    <div class="meta-item"><span class="meta-label">Last eruption</span><span class="meta-value">${v.last_eruption || "Unknown"}</span></div>
-    <div class="meta-item"><span class="meta-label">Evidence</span><span class="meta-value">${v.evidence || "—"}</span></div>
+    <div class="meta-item"><span class="meta-label">Country</span><span class="meta-value"><span class="meta-icon">📍</span>${v.country || "—"}</span></div>
+    <div class="meta-item"><span class="meta-label">Region</span><span class="meta-value"><span class="meta-icon">🗺️</span>${v.subregion || v.region || "—"}</span></div>
+    <div class="meta-item"><span class="meta-label">Type</span><span class="meta-value"><span class="meta-icon">🌋</span>${v.type || "—"}</span></div>
+    <div class="meta-item"><span class="meta-label">Elevation</span><span class="meta-value"><span class="meta-icon">📏</span>${elev}</span></div>
+    <div class="meta-item"><span class="meta-label">Last eruption</span><span class="meta-value"><span class="meta-icon">⏰</span>${v.last_eruption || "Unknown"}</span></div>
+    <div class="meta-item"><span class="meta-label">Evidence</span><span class="meta-value"><span class="meta-icon">📊</span>${v.evidence || "—"}</span></div>
   `;
+
+  // Update GVP link
+  const gvpLink = document.getElementById("gvp-link");
+  gvpLink.href = `https://volcano.si.edu/volcano.cfm?vn=${v.id}`;
+
 
   const visitEl = document.getElementById("panel-visitors");
 
