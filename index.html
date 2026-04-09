@@ -148,17 +148,27 @@
       align-items: center;
     }
     #panel-visitors {
-      font-size: 13px;
-      color: #00d4ff;
-      font-weight: 600;
+      font-size: 14px;
+      color: #fff;
+      font-weight: 700;
       cursor: pointer;
-      padding: 8px 12px;
-      border-radius: 6px;
-      transition: background 0.2s;
+      padding: 12px 20px;
+      border-radius: 8px;
+      transition: all 0.2s;
       display: inline-block;
+      background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);
+      border: none;
+      box-shadow: 0 2px 8px rgba(0,212,255,0.3);
+      text-align: center;
     }
     #panel-visitors:hover {
-      background: rgba(0,212,255,0.1);
+      background: linear-gradient(135deg, #00e5ff 0%, #00aadd 100%);
+      box-shadow: 0 4px 12px rgba(0,212,255,0.5);
+      transform: translateY(-2px);
+    }
+    #panel-visitors:active {
+      transform: translateY(0);
+      box-shadow: 0 2px 6px rgba(0,212,255,0.4);
     }
     #gvp-link {
       padding: 8px 14px;
@@ -618,16 +628,22 @@ function updatePanel(volcanoId) {
 
   if (isMine) {
     // Already marked by me
-    newVisitEl.textContent = `✓ You marked this volcano (${count} total visitor${count > 1 ? "s" : ""}) • Click to unmark`;
-    newVisitEl.style.color = "#00d4ff";
+    newVisitEl.textContent = `✓ You marked this volcano (${count} total visitor${count > 1 ? "s" : ""})`;
+    newVisitEl.style.background = "linear-gradient(135deg, #50c864 0%, #2a8a2a 100%)";
+    newVisitEl.style.color = "#fff";
+    newVisitEl.style.boxShadow = "0 2px 8px rgba(80,200,100,0.3)";
   } else if (count > 0) {
     // Others visited, but not me
-    newVisitEl.textContent = `${count} person${count > 1 ? "s" : ""} visited • Click to mark as visited`;
-    newVisitEl.style.color = "#888";
+    newVisitEl.textContent = `${count} person${count > 1 ? "s" : ""} visited • Mark as visited`;
+    newVisitEl.style.background = "linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)";
+    newVisitEl.style.color = "#fff";
+    newVisitEl.style.boxShadow = "0 2px 8px rgba(0,212,255,0.3)";
   } else {
     // No visits yet
-    newVisitEl.textContent = "Click to mark as visited →";
-    newVisitEl.style.color = "#888";
+    newVisitEl.textContent = "✨ Mark as visited";
+    newVisitEl.style.background = "linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)";
+    newVisitEl.style.color = "#fff";
+    newVisitEl.style.boxShadow = "0 2px 8px rgba(0,212,255,0.3)";
   }
 
   // Add click handler to toggle visit
